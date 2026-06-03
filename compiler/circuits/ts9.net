@@ -1,0 +1,23 @@
+# Tube Screamer (TS808/TS9) clipping + tone network — netlist source of truth.
+#
+# circuitc/netlist.py provides these component values to the discretizer today. The symbolic
+# Lcapy MNA front-end (later) will parse this SPICE-style netlist into the same component set.
+# Node 0 is ground. Pot wipers split as Rpot1 = Rpot*w, Rpot2 = Rpot*(1-w).
+#
+# --- drive / clipping feedback network ---
+R1     in     a       4700
+C1     a      0       0.047u
+Rf_d   a      out_d   51k       # series feedback resistor
+Rpot_d a      out_d   550k      # drive pot (full value)
+Cf     a      out_d   51p       # feedback cap
+# Asinh diode/op-amp soft clipper across the feedback path (nonlinear; split out as a
+# waveshaper node): Is = 1e-14, nVt = 26m.
+#
+# --- tone control + recovery stage ---
+R220   out_d  t       220
+Ctone  t      0       0.22u
+Rpot_t t      w       20k       # tone pot (full value)
+R1k    w      0       1k
+C4     w      out_t   0.22u
+R10k   w      out_t   10k
+Rf_t   t      out_t   1k

@@ -10,6 +10,7 @@
 
 #include "test_framework.h"
 #include "tonestack/Chain.h"
+#include "tonestack/nodes/BiquadNode.h"
 #include "tonestack/nodes/GainNode.h"
 
 namespace {
@@ -49,6 +50,35 @@ TS_TEST(process_does_not_allocate) {
     g_guard.store(true);
     for (int i = 0; i < 100; ++i)
         chain.process(block);
+    g_guard.store(false);
+
+    TS_CHECK(g_allocs.load() == 0);
+}
+
+TS_TEST(biquad_process_does_not_allocate) {
+    const float axis[2] = {0.0f, 1.0f};
+    const nodes::BiquadSection sections[2] = {
+        {0.2f, 0.1f, 0.05f, -0.3f, 0.1f},
+        {0.3f, 0.1f, 0.05f, -0.3f, 0.1f},
+    };
+    nodes::BiquadCoeffTable table{axis, sections, 2, 48000.0};
+
+    Chain chain;
+    auto biquad = std::make_unique<nodes::BiquadNode>(
+        ParameterDesc{"drive", 0.0f, 1.0f, 0.5f, ParamSkew::Linear, 0.5f, 0.0f}, table);
+    chain.add(std::move(biquad));
+    chain.prepare(ProcessSpec{48000.0, 512, 2}); // allocation permitted here
+
+    std::vector<float> l(512, 0.3f), r(512, 0.3f);
+    float* chans[2] = {l.data(), r.data()};
+    AudioBlock block(chans, 2, 512);
+
+    g_allocs.store(0);
+    g_guard.store(true);
+    for (int i = 0; i < 100; ++i) {
+        chain.at(0).parameters().byIndex(0).setProportion(static_cast<float>(i % 2)); // sweep -> re-interpolate
+        chain.process(block);
+    }
     g_guard.store(false);
 
     TS_CHECK(g_allocs.load() == 0);

@@ -1,0 +1,96 @@
+"""Golden regression for the TS9 discretizer.
+
+``discretize.py`` is the canonical source of the TS9 filter coefficients. These tests pin it
+three ways:
+
+1. against frozen literal coefficients (an independent anchor — break the long formulas and
+   this fails regardless of the committed JSON);
+2. against the committed golden IR in ``contract/golden`` (regenerate deliberately with
+   ``circuitc compile`` when the math intentionally changes);
+3. by pole stability across the whole swept table.
+
+When the symbolic MNA path lands, it must match the same committed golden.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import numpy as np
+
+from circuitc.discretize import drive_section, tone_section
+from circuitc.ir import BiquadParamTable, BiquadSection, iter_biquads
+from circuitc.netlist import TS9
+from circuitc.sample import build_ts9
+
+GOLDEN_DIR = Path(__file__).resolve().parents[2] / "contract" / "golden"
+TOL = 1e-9
+
+
+def test_drive_frozen_reference_point() -> None:
+    # drive=0.5, fs=192000 (48k base x4 oversample). Frozen from the float64 formula.
+    s = drive_section(TS9().drive, 0.5, 192000.0)
+    assert s.b0 == 10.283581651949808
+    assert s.b1 == -1.7058551098770915
+    assert s.b2 == -8.57141509607734
+    assert s.a1 == -1.7058551098770915
+    assert s.a2 == 0.712166555872467
+
+
+def test_tone_frozen_reference_point() -> None:
+    # tone=0.5, fs=48000. Frozen from the float64 formula.
+    s = tone_section(TS9().tone, 0.5, 48000.0)
+    assert s.b0 == 0.04906691142738325
+    assert s.b1 == 0.0008056540777394825
+    assert s.b2 == -0.04826125734964377
+    assert s.a1 == -1.8750019319584785
+    assert s.a2 == 0.8767743709295053
+
+
+def _load_committed(table_id: str) -> BiquadParamTable:
+    path = GOLDEN_DIR / f"ts9_{table_id}.coeffs.json"
+    return BiquadParamTable.model_validate(json.loads(path.read_text()))
+
+
+def _fresh(table_id: str) -> BiquadParamTable:
+    for table in iter_biquads(build_ts9().stages):
+        if table.id == table_id:
+            return table
+    raise KeyError(table_id)
+
+
+def _sections_close(sa: BiquadSection, sb: BiquadSection) -> bool:
+    return (
+        abs(sa.b0 - sb.b0) <= TOL
+        and abs(sa.b1 - sb.b1) <= TOL
+        and abs(sa.b2 - sb.b2) <= TOL
+        and abs(sa.a1 - sb.a1) <= TOL
+        and abs(sa.a2 - sb.a2) <= TOL
+    )
+
+
+def _assert_table_close(a: BiquadParamTable, b: BiquadParamTable) -> None:
+    assert a.param_axis == b.param_axis
+    assert len(a.rates) == len(b.rates)
+    for ra, rb in zip(a.rates, b.rates, strict=True):
+        assert ra.sample_rate == rb.sample_rate
+        for sa, sb in zip(ra.sections, rb.sections, strict=True):
+            assert _sections_close(sa, sb)
+
+
+def test_drive_matches_committed_golden() -> None:
+    _assert_table_close(_fresh("drive"), _load_committed("drive"))
+
+
+def test_tone_matches_committed_golden() -> None:
+    _assert_table_close(_fresh("tone"), _load_committed("tone"))
+
+
+def test_all_poles_stable() -> None:
+    for table in iter_biquads(build_ts9().stages):
+        for rate in table.rates:
+            for s in rate.sections:
+                roots = np.roots(np.array([1.0, s.a1, s.a2]))
+                max_radius = float(np.max(np.abs(roots)))
+                assert max_radius < 1.0, f"{table.id} @ {rate.sample_rate} unstable"

@@ -11,7 +11,7 @@ TS_TEST(parameter_linear_range) {
 }
 
 TS_TEST(parameter_log_skew_hits_midpoint) {
-    // Mirrors the original Tube Screamer tone taper: value == skewMidpoint at proportion 0.5.
+    // Log skew: value == skewMidpoint at proportion 0.5.
     Parameter p(ParameterDesc{"tone", 0.0f, 1.0f, 0.5f, ParamSkew::Logarithmic, 0.8f, 0.0f});
     p.prepare(48000.0, 512);
 

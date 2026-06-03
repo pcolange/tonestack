@@ -14,8 +14,10 @@ Tube Screamer plugin; that pedal becomes the first analytic module here.
 
 ## Status
 
-Early scaffold (Phase 0). The engine core, a first node, a dev harness, and a headless
-test suite build and run. Not yet usable as a plugin.
+Phase 1 in progress. The engine core, nodes (`GainNode`, `BiquadNode`), a dev harness, and a
+headless test suite build and run; the `circuitc` compiler discretizes the Tube Screamer
+filters into coefficient tables that the engine consumes through a generated header. Not yet
+usable as a plugin.
 
 ## Architecture
 
@@ -33,11 +35,14 @@ engine                   Node · Chain · ParameterSet · AudioBlock  (GPL-free 
 - **`engine/`** — `Node` (prepare/process/reset), a typed lock-free `ParameterSet`, a linear
   `Chain` (itself a `Node`, so composite modules nest), and a non-owning `AudioBlock`. All
   allocation happens in `prepare()`; `process()` is real-time safe.
-- **`nodes/`** — processing blocks. Currently `GainNode`; the Tube Screamer module (biquad +
-  asinh waveshaper + oversampling), neural, and convolution nodes follow.
+- **`nodes/`** — processing blocks: `GainNode`, `BiquadNode` (table-driven biquad). The asinh
+  waveshaper, oversampling, the composite Tube Screamer module, neural, and convolution nodes
+  follow.
 - **`harness/`** — a standalone dev runner (offline + live audio).
-- **`compiler/`** — the offline Python circuit compiler (Lcapy → scipy → coefficient tables).
-- **`contract/`** — the IR/data contract shared between compiler and engine.
+- **`compiler/`** — the offline Python circuit compiler `circuitc` (discretizer + coefficient
+  tables now; Lcapy → scipy symbolic front-end next).
+- **`contract/`** — the IR/data contract shared between compiler and engine (see
+  `contract/README.md`).
 
 ## Building
 
@@ -48,6 +53,14 @@ cmake --preset dev
 cmake --build build/dev
 ctest --preset dev
 ./build/dev/harness/tonestack-harness
+```
+
+Working on the Python compiler is optional (the C++ build runs without it):
+
+```sh
+python3 -m venv compiler/.venv
+compiler/.venv/bin/pip install -e 'compiler[dev]'
+( cd compiler && .venv/bin/python -m pytest )
 ```
 
 ## License

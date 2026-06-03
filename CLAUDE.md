@@ -11,24 +11,33 @@ and neural nodes coexist in one signal chain. Its distinguishing feature is an o
 symbolic analysis into discretized coefficients that drive real-time C++ engine nodes — no
 hand-derivation.
 
-It grows out of the archived [TubeSchemer](https://github.com/pcolange/TubeSchemer) Tube
-Screamer plugin; that pedal's circuit-derived DSP is the first analytic module and the golden
-reference for the compiler.
+The Tube Screamer is its first analytic module. The project originated as the archived
+[TubeSchemer](https://github.com/pcolange/TubeSchemer) plugin, but the implementation here is
+its own — TubeSchemer is reference material, not a spec to match.
 
 The full design and phased roadmap live in the plan file:
 `~/.claude-personal/plans/ok-given-what-we-ve-sunny-rivest.md`.
 
 ## Status
 
-**Phase 0 complete.** Engine core, first node (`GainNode`), dev harness, headless tests, and CI
-build and pass. Not yet a plugin.
+**Phase 1 in progress** (both tracks advancing together; the biquad slice is the contract
+meeting point and is complete end-to-end):
 
-**Next — Phase 1 (two tracks):**
-1. Port the Tube Screamer to engine nodes: `BiquadNode`, `WaveshaperNode` (asinh diode),
-   `OversampledNode`, composite `TubeScreamerModule`.
-2. Stand up the Python compiler `circuitc` (`compiler/`): Lcapy MNA → scipy `bilinear_zpk` →
-   coefficient-table IR → generated C++ header, with a golden regression that reproduces the
-   legacy `updateFilterState()` coefficients to ~1e-9.
+- **Track (a) — port to nodes.** `BiquadNode` done: transposed Direct Form II, coefficients
+  from an injected `BiquadCoeffTable` (a non-owning view of `constexpr` data) interpolated per
+  block by a bound parameter; no allocation after `prepare()`. `WaveshaperNode` (asinh diode),
+  `OversampledNode`, and the composite `TubeScreamerModule` are next.
+- **Track (b) — `circuitc` compiler.** Skeleton done: pydantic IR (`compiler/src/circuitc/ir.py`,
+  the contract source of truth), a discretizer that bilinear-transforms the TS9 drive/tone
+  filters, pot-sweep sampler, `emit-cpp` codegen, and a CLI.
+  Golden + round-trip + pole-stability tests pass. The symbolic **Lcapy MNA → scipy
+  `bilinear_zpk`** front-end (which must reproduce the same golden) is next.
+- **Meeting point proven.** `circuitc compile` emits `nodes/generated/ts9_tables.h`; the C++
+  `golden_coeffs` test drives `BiquadNode` from that header. CMake codegen is gated on the
+  compiler venv (a C++-only build skips it).
+
+**Phase 0 complete.** Engine core, `GainNode`, dev harness, headless tests, and CI build/pass.
+Not yet a plugin.
 
 ## Architecture
 
@@ -46,12 +55,18 @@ vendored DSP (RTNeural, chowdsp_* — added in later phases)
 ```
 
 - **`engine/`** — `Node` (`prepare`/`process`/`reset`/`parameters`/`info`), a typed lock-free
-  `ParameterSet` (log-skew + per-block smoothing; mirrors the original JUCE `NormalisableRange`
-  taper), a linear `Chain` (itself a `Node`, so composite modules nest), and a non-owning
+  `ParameterSet` (log-skew + per-block smoothing), a linear `Chain` (itself a `Node`, so
+  composite modules nest), and a non-owning
   `AudioBlock`. **All allocation in `prepare()`; `process()`/`reset()` are real-time safe.**
-- **`nodes/`** — processing blocks. Currently `GainNode` (header-only INTERFACE lib).
+- **`nodes/`** — processing blocks (header-only INTERFACE lib): `GainNode`, `BiquadNode`, and
+  the POD contract types in `BiquadCoeffs.h`. `nodes/generated/` holds codegen output from
+  `circuitc` (gitignored build artifact).
 - **`harness/`** — standalone dev runner (synthetic signal now; WAV + live audio later).
-- **`compiler/`** — the offline Python circuit compiler (not yet implemented).
+- **`compiler/`** — the offline Python circuit compiler `circuitc` (`src/circuitc/`):
+  `ir.py` (pydantic IR, contract source of truth), `netlist.py` (TS9 component values),
+  `discretize.py` (bilinear discretization of the TS9 filters), `sample.py` (pot sweep → IR), `emit_cpp.py`
+  (IR → `constexpr` header), `cli.py`. Tests + tooling run in `compiler/.venv` (ruff, pyright
+  strict, pytest). `circuits/ts9.net` is the netlist source for the future Lcapy front-end.
 - **`contract/`** — the IR/data contract shared between compiler and engine (pydantic schema is
   the single source of truth; coefficient **tables** sampled across pot positions, codegen'd to
   a POD C++ header — no JSON or parametric eval in the RT path).
@@ -68,6 +83,19 @@ cmake --build build/dev -j
 ctest --preset dev
 ./build/dev/harness/tonestack-harness
 ```
+
+The Python compiler is optional for a C++ build (codegen is gated on the venv). To work on it:
+
+```sh
+python3 -m venv compiler/.venv
+compiler/.venv/bin/pip install -e 'compiler[dev]'
+compiler/.venv/bin/circuitc compile                  # regen header + golden
+( cd compiler && .venv/bin/python -m pytest && .venv/bin/ruff check . && .venv/bin/pyright )
+```
+
+`circuitc compile` writes `nodes/generated/ts9_tables.h` (build artifact) and the committed
+golden IR under `contract/golden/`. The CMake codegen step reruns it automatically when the
+venv is present.
 
 ## Conventions
 

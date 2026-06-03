@@ -19,6 +19,9 @@ include(cmake/CompilerWarnings.cmake)
 
 enable_testing()
 
+# Offline circuit compiler codegen (optional; gated on the Python venv existing).
+include(cmake/Codegen.cmake)
+
 add_subdirectory(engine)
 add_subdirectory(nodes)
 add_subdirectory(harness)

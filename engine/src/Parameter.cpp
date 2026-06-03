@@ -39,8 +39,7 @@ Parameter& Parameter::operator=(Parameter&& o) noexcept {
 }
 
 Parameter::Parameter(const ParameterDesc& desc) : desc_(desc) {
-    // Log-skew factor chosen so that value(proportion = 0.5) == skewMidpoint, matching
-    // the JUCE NormalisableRange convention used by the original Tube Screamer.
+    // Log-skew factor chosen so that value(proportion 0.5) == skewMidpoint.
     if (desc_.skew == ParamSkew::Logarithmic) {
         const float span = desc_.max - desc_.min;
         if (span > 0.0f) {
