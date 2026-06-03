@@ -1,0 +1,16 @@
+# Shared warning configuration. Applied per-target via tonestack_set_warnings().
+
+function(tonestack_set_warnings target)
+    if(MSVC)
+        set(_warnings /W4 /permissive-)
+        if(TONESTACK_WARNINGS_AS_ERRORS)
+            list(APPEND _warnings /WX)
+        endif()
+    else()
+        set(_warnings -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
+        if(TONESTACK_WARNINGS_AS_ERRORS)
+            list(APPEND _warnings -Werror)
+        endif()
+    endif()
+    target_compile_options(${target} PRIVATE ${_warnings})
+endfunction()

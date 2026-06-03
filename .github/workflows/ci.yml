@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    name: build-test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (warnings as errors)
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build build/ci --config Release
+
+      - name: Test
+        run: ctest --preset ci --build-config Release --output-on-failure
