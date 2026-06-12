@@ -1,23 +1,60 @@
-# Tube Screamer (TS808/TS9) clipping + tone network — netlist source of truth.
+# Ibanez TS9 Tube Screamer — netlist source of truth.
 #
-# circuitc/netlist.py provides these component values to the discretizer today. The symbolic
-# Lcapy MNA front-end (later) will parse this SPICE-style netlist into the same component set.
-# Node 0 is ground. Pot wipers split as Rpot1 = Rpot*w, Rpot2 = Rpot*(1-w).
+# Traced from R.G. Keen's "TS-9, -10, -808 Signal Path" schematic (geofex.com, mirrored at
+# schematicheaven.net); cross-checked against the ElectroSmash Tube Screamer analysis.
+# See REFERENCE.md in this directory for the stage-by-stage ground truth, pot tapers,
+# corner frequencies, and what is / is not modeled.
 #
-# --- drive / clipping feedback network ---
-R1     in     a       4700
+# circuitc/netlist.py provides the MODELED component values to the discretizer today. The
+# symbolic Lcapy MNA front-end (later) will parse this netlist into the same component set.
+# Node 0 is ground (AC ground includes the +4.5V Vref rail). Pot wipers split as
+# Rpot1 = Rpot*w, Rpot2 = Rpot*(1-w).
+#
+# === input buffer (NOT modeled: corners are sub-20 Hz; see REFERENCE.md) ===
+# IN -> 0.02u coupling -> 1k series -> Q1 base (510k bias to Vref), emitter follower,
+# 10k emitter load -> 1u NP coupling -> A1 noninverting input (10k bias to Vref).
+#Cin    in     b1      0.02u
+#Rin    b1     b2      1k
+#Rbias1 b2     0       510k     # to +4.5V Vref
+#Q1     b2     e1      2SC1815  # emitter follower
+#Re1    e1     0       10k
+#Cc1    e1     in_a    1u       # NP
+#Rbias2 in_a   0       10k      # to +4.5V Vref
+#
+# === drive / clipping stage (MODELED: drive biquad + asinh waveshaper) ===
+# Non-inverting op-amp (A1, RC4558 half). Feedback: (51k + 500KA drive pot) || 51p || diodes.
+# Inverting leg to AC ground: 4.7k + 0.047u (720 Hz gain shelf).
+R1     in_a   a       4700
 C1     a      0       0.047u
 Rf_d   a      out_d   51k       # series feedback resistor
-Rpot_d a      out_d   550k      # drive pot (full value)
+Rpot_d a      out_d   500k      # drive pot, full value (500KA, audio taper)
 Cf     a      out_d   51p       # feedback cap
-# Asinh diode/op-amp soft clipper across the feedback path (nonlinear; split out as a
-# waveshaper node): Is = 1e-14, nVt = 26m.
+# Clipping diodes across the feedback path: 2x 1S1588 silicon (~1N4148). Split out as the
+# asinh waveshaper stage: Is = 2.52n, n*Vt = 45.3m (standard 1N4148 SPICE model).
 #
-# --- tone control + recovery stage ---
-R220   out_d  t       220
-Ctone  t      0       0.22u
-Rpot_t t      w       20k       # tone pot (full value)
-R1k    w      0       1k
-C4     w      out_t   0.22u
-R10k   w      out_t   10k
-Rf_t   t      out_t   1k
+# === tone control + recovery stage (MODELED: tone biquad) ===
+# A1 out -> 1k series -> node t (0.22u to ground = 723 Hz LPF; 10k bias to Vref).
+# Tone pot (20KG) end H = node t = A2 noninverting input; end J = A2 inverting input with
+# 1k feedback from A2 out; wiper -> 0.22u + 220R series to ground (3.3 kHz boost leg).
+R1k    out_d  t       1k        # series from clipping stage
+Ctone  t      0       0.22u     # LPF cap at node t
+R10k   t      0       10k       # bias to +4.5V Vref (AC ground)
+Rpot_t t      w       20k       # tone pot (20KG); t = end H, w = wiper, j = end J
+C4     w      cw      0.22u     # wiper boost leg
+R220   cw     0       220
+Rf_t   j      out_t   1k        # A2 feedback; A2 forces V(j) = V(t)
+#
+# === level / output buffer (NOT modeled; see REFERENCE.md) ===
+# A2 out -> 1u NP -> 1k -> LEVEL pot 100KB (other end to Vref), wiper -> 0.1u -> Q2 base
+# (510k bias), emitter follower, 10k emitter load -> 470R series -> 10u/16V -> jack,
+# 100k to ground. (TS808 differs here only: 100R series / 10k shunt, and RC4558 vs TA75558.)
+#Clev   out_t  l1      1u       # NP
+#Rlev   l1     l2      1k
+#RpotL  l2     0       100k     # level pot (100KB, linear), end M to Vref
+#Cq2    l2w    b3      0.1u     # wiper -> output buffer
+#Rbias3 b3     0       510k     # to +4.5V Vref
+#Q2     b3     e2      2SC1815  # emitter follower
+#Re2    e2     0       10k
+#Rout   e2     o1      470      # TS9 (TS808: 100)
+#Cout   o1     out     10u
+#Rpull  out    0       100k     # TS9 (TS808: 10k)

@@ -29,13 +29,14 @@ TOL = 1e-9
 
 
 def test_drive_frozen_reference_point() -> None:
-    # drive=0.5, fs=192000 (48k base x4 oversample). Frozen from the float64 formula.
+    # drive=0.5, fs=192000 (48k base x4 oversample). Frozen from the float64 formula with the
+    # factory 500k drive pot.
     s = drive_section(TS9().drive, 0.5, 192000.0)
-    assert s.b0 == 10.283581651949808
-    assert s.b1 == -1.7058551098770915
-    assert s.b2 == -8.57141509607734
-    assert s.a1 == -1.7058551098770915
-    assert s.a2 == 0.712166555872467
+    assert s.b0 == 10.18032517454916
+    assert s.b1 == -1.6866225777295742
+    assert s.b2 == -8.486942973773365
+    assert s.a1 == -1.6866225777295742
+    assert s.a2 == 0.693382200775795
 
 
 def test_tone_frozen_reference_point() -> None:

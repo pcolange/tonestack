@@ -53,23 +53,27 @@ def _axis(spec: ParamSpec, rows: int) -> list[float]:
 
 
 def drive_param() -> ParamSpec:
+    # Factory drive pot is 500KA (audio taper): ~10% of track at half rotation, modeled as
+    # log skew with midpoint 0.1 (see circuits/REFERENCE.md).
     return ParamSpec(
         id="drive",
         min=0.0,
         max=1.0,
-        skew=Skew.linear,
-        skew_midpoint=0.5,
+        skew=Skew.logarithmic,
+        skew_midpoint=0.1,
         default_proportion=0.5,
     )
 
 
 def tone_param() -> ParamSpec:
+    # Factory tone pot is 20KG (symmetric S-curve): 50% of track at half rotation. Linear
+    # skew matches the curve at the midpoint, the closest representable approximation.
     return ParamSpec(
         id="tone",
         min=0.0,
         max=1.0,
-        skew=Skew.logarithmic,
-        skew_midpoint=0.8,
+        skew=Skew.linear,
+        skew_midpoint=0.5,
         default_proportion=0.5,
     )
 

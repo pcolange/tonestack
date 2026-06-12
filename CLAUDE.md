@@ -66,7 +66,10 @@ vendored DSP (RTNeural, chowdsp_* — added in later phases)
   `ir.py` (pydantic IR, contract source of truth), `netlist.py` (TS9 component values),
   `discretize.py` (bilinear discretization of the TS9 filters), `sample.py` (pot sweep → IR), `emit_cpp.py`
   (IR → `constexpr` header), `cli.py`. Tests + tooling run in `compiler/.venv` (ruff, pyright
-  strict, pytest). `circuits/ts9.net` is the netlist source for the future Lcapy front-end.
+  strict, pytest). `circuits/ts9.net` is the netlist source for the future Lcapy front-end;
+  `circuits/REFERENCE.md` is the schematic-traced ground truth (component values, pot tapers,
+  diode constants, modeled-vs-omitted stages) — fidelity to the factory TS9 is the goal, and
+  changes to circuit values must be justified against it.
 - **`contract/`** — the IR/data contract shared between compiler and engine (pydantic schema is
   the single source of truth; coefficient **tables** sampled across pot positions, codegen'd to
   a POD C++ header — no JSON or parametric eval in the RT path).
