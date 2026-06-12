@@ -19,7 +19,9 @@ struct BiquadSection {
 // fraction). `axis` is sorted ascending; row i holds the discretized section at axis[i].
 // The data lives in constexpr arrays in a compiler-generated header (nodes/generated/); the
 // engine never recomputes coefficients, only interpolates between adjacent rows. A table is
-// valid for a single sample rate — the generated header exposes one table per supported rate.
+// valid for a single sample rate — the generated header exposes one table per supported rate,
+// and BiquadNode::prepare() rejects a mismatched rate. sampleRate == 0 marks a rate-agnostic
+// table (skips that check; intended for hand-built test tables).
 struct BiquadCoeffTable {
     const float*         axis = nullptr;     // [rows], ascending parameter values
     const BiquadSection* sections = nullptr; // [rows]

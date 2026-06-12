@@ -16,7 +16,7 @@ namespace tonestack {
 // signal paths.
 class Chain : public Node {
 public:
-    NodeInfo info() const noexcept override { return {"chain", {}, {}}; }
+    NodeInfo info() const noexcept override { return {"chain"}; }
 
     // setup thread only
     void add(std::unique_ptr<Node> node);
@@ -32,6 +32,7 @@ public:
     ParameterSet& parameters() noexcept override { return params_; }
 
     int latencySamples() const noexcept override;
+    int tailSamples() const noexcept override;
 
 private:
     std::vector<std::unique_ptr<Node>> nodes_;

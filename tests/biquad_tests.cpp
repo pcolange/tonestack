@@ -1,4 +1,5 @@
 #include <array>
+#include <stdexcept>
 #include <vector>
 
 #include "test_framework.h"
@@ -73,6 +74,21 @@ TS_TEST(biquad_interpolates_between_rows) {
     node.process(block);
 
     TS_CHECK_NEAR(x[0], 0.15, 1e-6);
+}
+
+TS_TEST(biquad_rejects_mismatched_table_rate) {
+    const float axis[1] = {0.0f};
+    const BiquadSection sections[1] = {{0.5f, 0.0f, 0.0f, -0.5f, 0.0f}};
+    BiquadCoeffTable table{axis, sections, 1, 44100.0};
+
+    BiquadNode node(linearPot("drive"), table);
+    bool threw = false;
+    try {
+        node.prepare(ProcessSpec{48000.0, 16, 1});
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    TS_CHECK(threw);
 }
 
 TS_TEST(biquad_channel_state_is_independent) {

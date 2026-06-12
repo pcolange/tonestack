@@ -15,20 +15,20 @@ public:
             /*defaultProportion*/ 0.5f,
             ParamSkew::Linear,
             /*skewMidpoint*/ 0.5f,
-            /*smoothingSeconds*/ 0.0f}});
+            /*smoothingSeconds*/ 0.02f}});
         gainIndex_ = params_.indexOf("gain");
     }
 
-    NodeInfo info() const noexcept override { return {"gain", {}, {}}; }
+    NodeInfo info() const noexcept override { return {"gain"}; }
 
     void prepare(const ProcessSpec& spec) override {
-        params_.prepare(spec.sampleRate, spec.maxBlockSize);
+        params_.prepare(spec.sampleRate);
     }
 
     void reset() noexcept override { params_.reset(); }
 
     void process(AudioBlock& io) noexcept override {
-        params_.snapshotBlock();
+        params_.snapshotBlock(io.numFrames());
         const float g = params_.byIndex(gainIndex_).value();
         for (int ch = 0; ch < io.numChannels(); ++ch) {
             float* x = io.channel(ch);

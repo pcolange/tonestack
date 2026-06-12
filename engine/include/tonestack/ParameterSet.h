@@ -16,12 +16,12 @@ public:
     void define(std::initializer_list<ParameterDesc> descs);
     void add(const ParameterDesc& desc);
 
-    void prepare(double sampleRate, int maxBlockSize) noexcept;
+    void prepare(double sampleRate) noexcept;
     void reset() noexcept;
 
     int size() const noexcept { return static_cast<int>(params_.size()); }
 
-    // setup-time lookup (asserts the id exists)
+    // setup-time lookup (throws std::out_of_range if the id is unknown)
     Parameter& get(std::string_view id);
     int indexOf(std::string_view id) const noexcept; // -1 if absent
 
@@ -29,7 +29,7 @@ public:
     Parameter&       byIndex(int i)       noexcept { return params_[static_cast<size_t>(i)]; }
     const Parameter& byIndex(int i) const noexcept { return params_[static_cast<size_t>(i)]; }
 
-    void snapshotBlock() noexcept;
+    void snapshotBlock(int numFrames) noexcept;
 
 private:
     std::vector<Parameter> params_;

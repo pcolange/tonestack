@@ -9,12 +9,12 @@ namespace tonestack {
 Parameter::Parameter(const Parameter& o) noexcept
     : desc_(o.desc_), skewFactor_(o.skewFactor_),
       target_(o.target_.load(std::memory_order_relaxed)),
-      current_(o.current_), blockCoeff_(o.blockCoeff_) {}
+      current_(o.current_), sampleRate_(o.sampleRate_) {}
 
 Parameter::Parameter(Parameter&& o) noexcept
     : desc_(std::move(o.desc_)), skewFactor_(o.skewFactor_),
       target_(o.target_.load(std::memory_order_relaxed)),
-      current_(o.current_), blockCoeff_(o.blockCoeff_) {}
+      current_(o.current_), sampleRate_(o.sampleRate_) {}
 
 Parameter& Parameter::operator=(const Parameter& o) noexcept {
     if (this != &o) {
@@ -22,7 +22,7 @@ Parameter& Parameter::operator=(const Parameter& o) noexcept {
         skewFactor_ = o.skewFactor_;
         target_.store(o.target_.load(std::memory_order_relaxed), std::memory_order_relaxed);
         current_ = o.current_;
-        blockCoeff_ = o.blockCoeff_;
+        sampleRate_ = o.sampleRate_;
     }
     return *this;
 }
@@ -33,7 +33,7 @@ Parameter& Parameter::operator=(Parameter&& o) noexcept {
         skewFactor_ = o.skewFactor_;
         target_.store(o.target_.load(std::memory_order_relaxed), std::memory_order_relaxed);
         current_ = o.current_;
-        blockCoeff_ = o.blockCoeff_;
+        sampleRate_ = o.sampleRate_;
     }
     return *this;
 }
@@ -52,14 +52,8 @@ Parameter::Parameter(const ParameterDesc& desc) : desc_(desc) {
     current_ = desc_.defaultProportion;
 }
 
-void Parameter::prepare(double sampleRate, int maxBlockSize) noexcept {
-    if (desc_.smoothingSeconds > 0.0f && sampleRate > 0.0 && maxBlockSize > 0) {
-        const double blockSeconds = static_cast<double>(maxBlockSize) / sampleRate;
-        const double tau = desc_.smoothingSeconds;
-        blockCoeff_ = static_cast<float>(1.0 - std::exp(-blockSeconds / tau));
-    } else {
-        blockCoeff_ = 1.0f; // snap instantly
-    }
+void Parameter::prepare(double sampleRate) noexcept {
+    sampleRate_ = sampleRate;
     reset();
 }
 
@@ -75,9 +69,16 @@ float Parameter::targetProportion() const noexcept {
     return target_.load(std::memory_order_relaxed);
 }
 
-void Parameter::snapshotBlock() noexcept {
+void Parameter::snapshotBlock(int numFrames) noexcept {
     const float t = target_.load(std::memory_order_relaxed);
-    current_ += blockCoeff_ * (t - current_);
+    if (desc_.smoothingSeconds <= 0.0f || sampleRate_ <= 0.0 || numFrames <= 0) {
+        current_ = t; // snap instantly
+        return;
+    }
+    const double blockSeconds = static_cast<double>(numFrames) / sampleRate_;
+    const double tau = static_cast<double>(desc_.smoothingSeconds);
+    const float coeff = static_cast<float>(1.0 - std::exp(-blockSeconds / tau));
+    current_ += coeff * (t - current_);
 }
 
 float Parameter::proportion() const noexcept {

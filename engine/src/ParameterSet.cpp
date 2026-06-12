@@ -1,6 +1,7 @@
 #include "tonestack/ParameterSet.h"
 
-#include <cassert>
+#include <stdexcept>
+#include <string>
 
 namespace tonestack {
 
@@ -15,9 +16,9 @@ void ParameterSet::add(const ParameterDesc& desc) {
     params_.emplace_back(desc);
 }
 
-void ParameterSet::prepare(double sampleRate, int maxBlockSize) noexcept {
+void ParameterSet::prepare(double sampleRate) noexcept {
     for (auto& p : params_)
-        p.prepare(sampleRate, maxBlockSize);
+        p.prepare(sampleRate);
 }
 
 void ParameterSet::reset() noexcept {
@@ -34,13 +35,14 @@ int ParameterSet::indexOf(std::string_view id) const noexcept {
 
 Parameter& ParameterSet::get(std::string_view id) {
     const int i = indexOf(id);
-    assert(i >= 0 && "ParameterSet::get: unknown parameter id");
+    if (i < 0)
+        throw std::out_of_range("ParameterSet::get: unknown parameter id: " + std::string(id));
     return params_[static_cast<size_t>(i)];
 }
 
-void ParameterSet::snapshotBlock() noexcept {
+void ParameterSet::snapshotBlock(int numFrames) noexcept {
     for (auto& p : params_)
-        p.snapshotBlock();
+        p.snapshotBlock(numFrames);
 }
 
 } // namespace tonestack

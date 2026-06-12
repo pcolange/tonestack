@@ -1,5 +1,5 @@
 {
-  "ir_version": "0.1.0",
+  "ir_version": "0.2.0",
   "name": "ts9",
   "sample_rates": [
     44100.0,
@@ -21,7 +21,8 @@
             "max": 1.0,
             "skew": "linear",
             "skew_midpoint": 0.5,
-            "default_proportion": 0.5
+            "default_proportion": 0.5,
+            "smoothing_seconds": 0.02
           },
           "param_axis": [
             0.0,
@@ -1926,7 +1927,8 @@
         "max": 1.0,
         "skew": "logarithmic",
         "skew_midpoint": 0.8,
-        "default_proportion": 0.5
+        "default_proportion": 0.5,
+        "smoothing_seconds": 0.02
       },
       "param_axis": [
         0.0,

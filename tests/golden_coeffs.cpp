@@ -40,6 +40,34 @@ TS_TEST(biquad_reproduces_generated_section_at_axis_endpoint) {
     TS_CHECK_NEAR(x[0], gen::drive_sections_192000[gen::drive_rows - 1].b0, 1e-4);
 }
 
+TS_TEST(tone_skew_midpoint_pins_engine_and_compiler_skew_math) {
+    // Proportion 0.5 on the log-skewed tone pot must land on the physical skew midpoint
+    // (0.8). An impulse's first output then equals the table linearly interpolated at axis
+    // value 0.8 — pinning the engine's skew math to the compiler's axis sampling.
+    const nodes::BiquadCoeffTable* table = gen::toneTable(48000.0);
+    TS_CHECK(table != nullptr);
+
+    nodes::BiquadNode node(gen::toneParam(), *table);
+    node.parameters().get("tone").setProportion(0.5f);
+    node.prepare(ProcessSpec{48000.0, 4, 1});
+
+    std::vector<float> x = {1.0f, 0.0f, 0.0f, 0.0f};
+    float* chans[1] = {x.data()};
+    AudioBlock block(chans, 1, 4);
+    node.process(block);
+
+    const float v = 0.8f; // toneParam() skew midpoint
+    int hi = 1;
+    while (hi < gen::tone_rows - 1 && gen::tone_axis[hi] <= v)
+        ++hi;
+    const int lo = hi - 1;
+    const float t = (v - gen::tone_axis[lo]) / (gen::tone_axis[hi] - gen::tone_axis[lo]);
+    const float expectedB0 =
+        gen::tone_sections_48000[lo].b0
+        + t * (gen::tone_sections_48000[hi].b0 - gen::tone_sections_48000[lo].b0);
+    TS_CHECK_NEAR(x[0], expectedB0, 1e-5);
+}
+
 TS_TEST(generated_tone_table_is_stable_over_a_block) {
     const nodes::BiquadCoeffTable* table = gen::toneTable(48000.0);
     TS_CHECK(table != nullptr);

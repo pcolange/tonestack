@@ -24,8 +24,10 @@ struct ParameterDesc {
 };
 
 // One parameter. The host/UI thread writes a normalized target via setProportion();
-// the audio thread takes a single snapshot per block in snapshotBlock() and reads the
-// smoothed physical value via value(). Update is lock-free (a relaxed atomic store/load).
+// the audio thread takes a single snapshot per block in snapshotBlock(numFrames) and reads
+// the smoothed physical value via value(). Smoothing time is wall-clock — derived from the
+// actual frames delivered, not the prepared maximum, so variable host block sizes do not
+// stretch it. Update is lock-free (a relaxed atomic store/load).
 class Parameter {
 public:
     Parameter() = default;
@@ -38,7 +40,7 @@ public:
     Parameter& operator=(const Parameter& other) noexcept;
     Parameter& operator=(Parameter&& other) noexcept;
 
-    void prepare(double sampleRate, int maxBlockSize) noexcept;
+    void prepare(double sampleRate) noexcept;
     void reset() noexcept;
 
     // host / UI thread
@@ -46,7 +48,7 @@ public:
     float targetProportion() const noexcept;
 
     // audio thread
-    void  snapshotBlock() noexcept;
+    void  snapshotBlock(int numFrames) noexcept;
     float value() const noexcept;       // smoothed physical value (range + skew applied)
     float proportion() const noexcept;  // smoothed normalized value
 
@@ -60,7 +62,7 @@ private:
 
     std::atomic<float> target_{0.0f};   // normalized [0,1], written by UI/host thread
     float current_ = 0.0f;              // smoothed normalized, audio thread only
-    float blockCoeff_ = 1.0f;           // per-block one-pole smoothing coefficient
+    double sampleRate_ = 0.0;           // for the per-block smoothing coefficient
 };
 
 } // namespace tonestack

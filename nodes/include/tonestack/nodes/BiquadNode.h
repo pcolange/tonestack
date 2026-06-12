@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 #include <vector>
 
 #include "tonestack/Node.h"
@@ -25,10 +27,16 @@ public:
         paramIndex_ = params_.indexOf(paramDesc.id);
     }
 
-    NodeInfo info() const noexcept override { return {"biquad", {}, {}}; }
+    NodeInfo info() const noexcept override { return {"biquad"}; }
 
     void prepare(const ProcessSpec& spec) override {
-        params_.prepare(spec.sampleRate, spec.maxBlockSize);
+        // A table is only valid at the rate it was discretized for; running it at another
+        // rate silently detunes the filter, so reject the mismatch loudly here.
+        if (table_.sampleRate > 0.0 &&
+            std::llround(table_.sampleRate) != std::llround(spec.sampleRate))
+            throw std::invalid_argument(
+                "BiquadNode: coefficient table sample rate does not match prepare() rate");
+        params_.prepare(spec.sampleRate);
         z1_.assign(static_cast<size_t>(spec.numChannels), 0.0f);
         z2_.assign(static_cast<size_t>(spec.numChannels), 0.0f);
         coeffsForValue(currentAxisValue(), current_);
@@ -42,10 +50,11 @@ public:
     }
 
     void process(AudioBlock& io) noexcept override {
-        params_.snapshotBlock();
+        params_.snapshotBlock(io.numFrames());
         coeffsForValue(currentAxisValue(), current_);
         const BiquadSection c = current_;
 
+        TS_RT_ASSERT(io.numChannels() <= static_cast<int>(z1_.size()));
         const int channels = std::min(io.numChannels(), static_cast<int>(z1_.size()));
         for (int ch = 0; ch < channels; ++ch) {
             float* x = io.channel(ch);

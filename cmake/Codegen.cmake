@@ -2,6 +2,10 @@
 # coefficient header from the circuit definition. Gated on the compiler venv existing so a
 # C++-only build/CI job (no Python) still configures — it just skips the generated-header test.
 #
+# Only the header is generated here. The committed golden IR in contract/golden is a
+# regression anchor and is rewritten only by a deliberate `circuitc compile --update-golden`,
+# never as a build side effect.
+#
 # Set up the venv with:  python3 -m venv compiler/.venv &&
 #   compiler/.venv/bin/pip install -e compiler[dev]
 
@@ -16,7 +20,6 @@ if(EXISTS "${_circuitc_py}")
         COMMAND "${CMAKE_COMMAND}" -E env "PYTHONPATH=${CMAKE_SOURCE_DIR}/compiler/src"
                 "${_circuitc_py}" -m circuitc.cli compile
                 --out-header "${_generated_header}"
-                --golden-dir "${CMAKE_SOURCE_DIR}/contract/golden"
         DEPENDS ${_circuitc_srcs}
         COMMENT "circuitc: generating ${_generated_header}"
         VERBATIM)

@@ -94,3 +94,35 @@ def test_all_poles_stable() -> None:
                 roots = np.roots(np.array([1.0, s.a1, s.a2]))
                 max_radius = float(np.max(np.abs(roots)))
                 assert max_radius < 1.0, f"{table.id} @ {rate.sample_rate} unstable"
+
+
+def test_interpolated_midpoints_stable() -> None:
+    # BiquadNode lerps coefficients between rows; stability at the rows does not imply
+    # stability between them, so check every adjacent-row midpoint too.
+    for table in iter_biquads(build_ts9().stages):
+        for rate in table.rates:
+            for s0, s1 in zip(rate.sections, rate.sections[1:], strict=False):
+                a1 = 0.5 * (s0.a1 + s1.a1)
+                a2 = 0.5 * (s0.a2 + s1.a2)
+                roots = np.roots(np.array([1.0, a1, a2]))
+                max_radius = float(np.max(np.abs(roots)))
+                assert max_radius < 1.0, f"{table.id} @ {rate.sample_rate} midpoint unstable"
+
+
+def _magnitude(s: BiquadSection, freq: float, fs: float) -> float:
+    zi = np.exp(-2j * np.pi * freq / fs)
+    num = s.b0 + s.b1 * zi + s.b2 * zi * zi
+    den = 1.0 + s.a1 * zi + s.a2 * zi * zi
+    return float(abs(num / den))
+
+
+def test_tone_pot_shapes_treble() -> None:
+    # Outcome check: tone rolled down darkens the signal (4 kHz falls relative to 200 Hz);
+    # tone up brightens it.
+    fs = 48000.0
+    dark = tone_section(TS9().tone, 0.0, fs)
+    bright = tone_section(TS9().tone, 1.0, fs)
+    dark_ratio = _magnitude(dark, 4000.0, fs) / _magnitude(dark, 200.0, fs)
+    bright_ratio = _magnitude(bright, 4000.0, fs) / _magnitude(bright, 200.0, fs)
+    assert dark_ratio < bright_ratio
+    assert dark_ratio < 1.0

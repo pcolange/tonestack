@@ -89,13 +89,15 @@ The Python compiler is optional for a C++ build (codegen is gated on the venv). 
 ```sh
 python3 -m venv compiler/.venv
 compiler/.venv/bin/pip install -e 'compiler[dev]'
-compiler/.venv/bin/circuitc compile                  # regen header + golden
+compiler/.venv/bin/circuitc compile                  # regen header only
+compiler/.venv/bin/circuitc compile --update-golden  # also rewrite committed golden IR
 ( cd compiler && .venv/bin/python -m pytest && .venv/bin/ruff check . && .venv/bin/pyright )
 ```
 
-`circuitc compile` writes `nodes/generated/ts9_tables.h` (build artifact) and the committed
-golden IR under `contract/golden/`. The CMake codegen step reruns it automatically when the
-venv is present.
+`circuitc compile` writes `nodes/generated/ts9_tables.h` (build artifact). The committed
+golden IR under `contract/golden/` is a regression anchor: it is rewritten only by a
+deliberate `--update-golden`, never as a build side effect. The CMake codegen step
+regenerates the header automatically when the venv is present.
 
 ## Conventions
 

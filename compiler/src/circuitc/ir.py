@@ -11,6 +11,7 @@ rows. All symbolic/algebraic work stays here, offline.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from enum import Enum
 from typing import Annotated, Literal
@@ -18,7 +19,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Semver. The C++ loader rejects a major-version mismatch.
-IR_VERSION = "0.1.0"
+IR_VERSION = "0.2.0"
 
 
 class _Strict(BaseModel):
@@ -40,6 +41,7 @@ class ParamSpec(_Strict):
     skew: Skew = Skew.linear
     skew_midpoint: float = 0.5
     default_proportion: float = 0.0
+    smoothing_seconds: float = 0.02
 
 
 class BiquadSection(_Strict):
@@ -51,6 +53,13 @@ class BiquadSection(_Strict):
     b2: float
     a1: float
     a2: float
+
+    @model_validator(mode="after")
+    def _check_finite(self) -> BiquadSection:
+        for name in ("b0", "b1", "b2", "a1", "a2"):
+            if not math.isfinite(getattr(self, name)):
+                raise ValueError(f"non-finite coefficient {name}")
+        return self
 
 
 class BiquadRateTable(_Strict):
@@ -72,6 +81,8 @@ class BiquadParamTable(_Strict):
         n = len(self.param_axis)
         if n < 1:
             raise ValueError(f"{self.id}: param_axis must be non-empty")
+        if any(not math.isfinite(v) for v in self.param_axis):
+            raise ValueError(f"{self.id}: param_axis must be finite")
         if any(b <= a for a, b in zip(self.param_axis, self.param_axis[1:], strict=False)):
             raise ValueError(f"{self.id}: param_axis must be strictly ascending")
         for rate in self.rates:

@@ -39,7 +39,8 @@ def _emit_param(table_id: str, p: ParamSpec, out: list[str]) -> None:
     out.append(f"inline ParameterDesc {table_id}Param() {{")
     out.append("    return ParameterDesc{")
     out.append(f'        "{p.id}", {_f(p.min)}, {_f(p.max)}, {_f(p.default_proportion)},')
-    out.append(f"        {_skew_token(p.skew)}, {_f(p.skew_midpoint)}, 0.0f}};")
+    smoothing = _f(p.smoothing_seconds)
+    out.append(f"        {_skew_token(p.skew)}, {_f(p.skew_midpoint)}, {smoothing}}};")
     out.append("}")
 
 
@@ -61,11 +62,10 @@ def _emit_biquad(table: BiquadParamTable, out: list[str]) -> None:
             f"{{{tid}_axis, {tid}_sections_{tok}, {n}, {rate.sample_rate:.1f}}};"
         )
     out.append(f"inline const BiquadCoeffTable* {tid}Table(double sampleRate) noexcept {{")
+    out.append("    const long long hz = static_cast<long long>(sampleRate + 0.5);")
     for rate in table.rates:
         tok = _rate_token(rate.sample_rate)
-        out.append(
-            f"    if (sampleRate == {rate.sample_rate:.1f}) return &{tid}_table_{tok};"
-        )
+        out.append(f"    if (hz == {tok}) return &{tid}_table_{tok};")
     out.append("    return nullptr;")
     out.append("}")
     _emit_param(tid, table.param, out)
