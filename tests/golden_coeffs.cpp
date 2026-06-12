@@ -14,8 +14,10 @@ namespace gen = tonestack::nodes::generated::ts9;
 
 TS_TEST(generated_tables_have_expected_shape) {
     TS_CHECK(gen::oversample_factor == 4);
-    TS_CHECK(gen::drive_rows == 64);
-    TS_CHECK(gen::tone_rows == 64);
+    TS_CHECK(gen::drive_num_axes == 1);
+    TS_CHECK(gen::tone_num_axes == 1);
+    TS_CHECK(gen::drive_dims[0] == 64);
+    TS_CHECK(gen::tone_dims[0] == 64);
     TS_CHECK(gen::driveTable(192000.0) != nullptr); // 48k base x4 oversample
     TS_CHECK(gen::toneTable(48000.0) != nullptr);
     TS_CHECK(gen::driveTable(12345.0) == nullptr);   // unsupported rate
@@ -37,7 +39,7 @@ TS_TEST(biquad_reproduces_generated_section_at_axis_endpoint) {
     AudioBlock block(chans, 1, 4);
     node.process(block);
 
-    TS_CHECK_NEAR(x[0], gen::drive_sections_192000[gen::drive_rows - 1].b0, 1e-4);
+    TS_CHECK_NEAR(x[0], gen::drive_sections_192000[gen::drive_dims[0] - 1].b0, 1e-4);
 }
 
 TS_TEST(drive_skew_midpoint_pins_engine_and_compiler_skew_math) {
@@ -58,10 +60,10 @@ TS_TEST(drive_skew_midpoint_pins_engine_and_compiler_skew_math) {
 
     const float v = 0.1f; // driveParam() skew midpoint
     int hi = 1;
-    while (hi < gen::drive_rows - 1 && gen::drive_axis[hi] <= v)
+    while (hi < gen::drive_dims[0] - 1 && gen::drive_axis0[hi] <= v)
         ++hi;
     const int lo = hi - 1;
-    const float t = (v - gen::drive_axis[lo]) / (gen::drive_axis[hi] - gen::drive_axis[lo]);
+    const float t = (v - gen::drive_axis0[lo]) / (gen::drive_axis0[hi] - gen::drive_axis0[lo]);
     const float expectedB0 =
         gen::drive_sections_192000[lo].b0
         + t * (gen::drive_sections_192000[hi].b0 - gen::drive_sections_192000[lo].b0);

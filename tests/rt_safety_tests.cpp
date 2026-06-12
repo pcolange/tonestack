@@ -17,6 +17,9 @@
 #include "tonestack/Chain.h"
 #include "tonestack/nodes/BiquadNode.h"
 #include "tonestack/nodes/GainNode.h"
+#include "tonestack/nodes/IirNode.h"
+#include "tonestack/nodes/OversampledNode.h"
+#include "tonestack/nodes/WaveshaperNode.h"
 
 namespace {
 std::atomic<bool> g_guard{false};
@@ -98,12 +101,14 @@ TS_TEST(process_does_not_allocate) {
 }
 
 TS_TEST(biquad_process_does_not_allocate) {
-    const float axis[2] = {0.0f, 1.0f};
-    const nodes::BiquadSection sections[2] = {
+    static const float axis0[2] = {0.0f, 1.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {2};
+    static const nodes::BiquadSection sections[2] = {
         {0.2f, 0.1f, 0.05f, -0.3f, 0.1f},
         {0.3f, 0.1f, 0.05f, -0.3f, 0.1f},
     };
-    nodes::BiquadCoeffTable table{axis, sections, 2, 48000.0};
+    nodes::BiquadCoeffTable table{axes, dims, 1, sections, 48000.0};
 
     Chain chain;
     auto biquad = std::make_unique<nodes::BiquadNode>(
@@ -119,6 +124,60 @@ TS_TEST(biquad_process_does_not_allocate) {
     g_guard.store(true);
     for (int i = 0; i < 100; ++i) {
         chain.at(0).parameters().byIndex(0).setProportion(static_cast<float>(i % 2)); // sweep -> re-interpolate
+        chain.process(block);
+    }
+    g_guard.store(false);
+
+    TS_CHECK(g_allocs.load() == 0);
+}
+
+TS_TEST(oversampled_waveshaper_process_does_not_allocate) {
+    auto shaper = std::make_unique<nodes::WaveshaperNode<nodes::AsinhDiodeShape>>(
+        ParameterDesc{"drive", 0.0f, 1.0f, 0.5f, ParamSkew::Linear, 0.5f, 0.0f},
+        nodes::AsinhDiodeShape{2.52e-9f, 45.3e-3f, 51e3f, 500e3f});
+
+    Chain chain;
+    chain.add(std::make_unique<nodes::OversampledNode>(std::move(shaper)));
+    chain.prepare(ProcessSpec{48000.0, 512, 2}); // allocation permitted here
+
+    std::vector<float> l(512, 0.3f), r(512, 0.3f);
+    float* chans[2] = {l.data(), r.data()};
+    AudioBlock block(chans, 2, 512);
+
+    g_allocs.store(0);
+    g_guard.store(true);
+    for (int i = 0; i < 50; ++i) {
+        chain.at(0).parameters().byIndex(0).setProportion(static_cast<float>(i % 2));
+        chain.process(block);
+    }
+    g_guard.store(false);
+
+    TS_CHECK(g_allocs.load() == 0);
+}
+
+TS_TEST(iir_process_does_not_allocate) {
+    static const float rows[2 * 9] = {
+        0.2f, 0.1f, -0.05f, 0.02f, 0.01f, -0.8f, 0.3f, -0.1f, 0.02f,
+        0.3f, 0.1f, -0.05f, 0.02f, 0.01f, -0.8f, 0.3f, -0.1f, 0.02f,
+    };
+    static const float axis0[2] = {0.0f, 1.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {2};
+    nodes::IirCoeffTable table{axes, dims, 1, rows, 4, 48000.0};
+
+    Chain chain;
+    chain.add(std::make_unique<nodes::IirNode>(
+        ParameterDesc{"volume", 0.0f, 1.0f, 0.5f, ParamSkew::Linear, 0.5f, 0.0f}, table));
+    chain.prepare(ProcessSpec{48000.0, 512, 2}); // allocation permitted here
+
+    std::vector<float> l(512, 0.3f), r(512, 0.3f);
+    float* chans[2] = {l.data(), r.data()};
+    AudioBlock block(chans, 2, 512);
+
+    g_allocs.store(0);
+    g_guard.store(true);
+    for (int i = 0; i < 50; ++i) {
+        chain.at(0).parameters().byIndex(0).setProportion(static_cast<float>(i % 2));
         chain.process(block);
     }
     g_guard.store(false);

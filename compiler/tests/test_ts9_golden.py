@@ -72,7 +72,7 @@ def _sections_close(sa: BiquadSection, sb: BiquadSection) -> bool:
 
 
 def _assert_table_close(a: BiquadParamTable, b: BiquadParamTable) -> None:
-    assert a.param_axis == b.param_axis
+    assert a.axes == b.axes
     assert len(a.rates) == len(b.rates)
     for ra, rb in zip(a.rates, b.rates, strict=True):
         assert ra.sample_rate == rb.sample_rate

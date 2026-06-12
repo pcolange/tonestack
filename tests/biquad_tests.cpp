@@ -34,9 +34,11 @@ std::vector<float> referenceTdf2(const BiquadSection& c, const std::vector<float
 
 TS_TEST(biquad_matches_reference_recurrence) {
     const BiquadSection c{0.2f, 0.1f, 0.05f, -0.3f, 0.1f}; // arbitrary stable section
-    const float axis[1] = {0.0f};
-    const BiquadSection sections[1] = {c};
-    BiquadCoeffTable table{axis, sections, 1, 48000.0};
+    static const float axis0[1] = {0.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {1};
+    static const BiquadSection sections[1] = {c};
+    BiquadCoeffTable table{axes, dims, 1, sections, 48000.0};
 
     BiquadNode node(linearPot("drive"), table);
     node.prepare(ProcessSpec{48000.0, 16, 1});
@@ -57,12 +59,14 @@ TS_TEST(biquad_matches_reference_recurrence) {
 TS_TEST(biquad_interpolates_between_rows) {
     // Two rows sharing poles; b coefficients scale 1x -> 2x so the section is linear in the
     // table position. At axis 0.5 the interpolated b0 must be the midpoint (0.15).
-    const float axis[2] = {0.0f, 1.0f};
-    const BiquadSection sections[2] = {
+    static const float axis0[2] = {0.0f, 1.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {2};
+    static const BiquadSection sections[2] = {
         {0.1f, 0.0f, 0.0f, -0.3f, 0.1f},
         {0.2f, 0.0f, 0.0f, -0.3f, 0.1f},
     };
-    BiquadCoeffTable table{axis, sections, 2, 48000.0};
+    BiquadCoeffTable table{axes, dims, 1, sections, 48000.0};
 
     BiquadNode node(linearPot("tone"), table);
     node.parameters().get("tone").setProportion(0.5f); // linear -> axis value 0.5
@@ -76,10 +80,41 @@ TS_TEST(biquad_interpolates_between_rows) {
     TS_CHECK_NEAR(x[0], 0.15, 1e-6);
 }
 
+TS_TEST(biquad_bilinear_interpolation_over_two_axes) {
+    // 2x2 grid whose b0 is bilinear by construction: b0(x, y) = 0.1 + 0.2x + 0.3y + 0.4xy.
+    // At (x, y) = (0.25, 0.75) the blend must give exactly 0.45.
+    static const float axisX[2] = {0.0f, 1.0f};
+    static const float axisY[2] = {0.0f, 1.0f};
+    static const float* axes[2] = {axisX, axisY};
+    static const int dims[2] = {2, 2};
+    // Row-major, last axis (y) fastest: (x0,y0), (x0,y1), (x1,y0), (x1,y1).
+    static const BiquadSection sections[4] = {
+        {0.1f, 0.0f, 0.0f, -0.3f, 0.1f},
+        {0.4f, 0.0f, 0.0f, -0.3f, 0.1f},
+        {0.3f, 0.0f, 0.0f, -0.3f, 0.1f},
+        {1.0f, 0.0f, 0.0f, -0.3f, 0.1f},
+    };
+    BiquadCoeffTable table{axes, dims, 2, sections, 48000.0};
+
+    BiquadNode node({linearPot("x"), linearPot("y")}, table);
+    node.parameters().get("x").setProportion(0.25f);
+    node.parameters().get("y").setProportion(0.75f);
+    node.prepare(ProcessSpec{48000.0, 4, 1});
+
+    std::vector<float> x = {1.0f, 0.0f, 0.0f, 0.0f};
+    float* chans[1] = {x.data()};
+    AudioBlock block(chans, 1, 4);
+    node.process(block);
+
+    TS_CHECK_NEAR(x[0], 0.45, 1e-6);
+}
+
 TS_TEST(biquad_rejects_mismatched_table_rate) {
-    const float axis[1] = {0.0f};
-    const BiquadSection sections[1] = {{0.5f, 0.0f, 0.0f, -0.5f, 0.0f}};
-    BiquadCoeffTable table{axis, sections, 1, 44100.0};
+    static const float axis0[1] = {0.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {1};
+    static const BiquadSection sections[1] = {{0.5f, 0.0f, 0.0f, -0.5f, 0.0f}};
+    BiquadCoeffTable table{axes, dims, 1, sections, 44100.0};
 
     BiquadNode node(linearPot("drive"), table);
     bool threw = false;
@@ -91,10 +126,28 @@ TS_TEST(biquad_rejects_mismatched_table_rate) {
     TS_CHECK(threw);
 }
 
+TS_TEST(biquad_rejects_param_axis_count_mismatch) {
+    static const float axis0[1] = {0.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {1};
+    static const BiquadSection sections[1] = {{0.5f, 0.0f, 0.0f, -0.5f, 0.0f}};
+    BiquadCoeffTable table{axes, dims, 1, sections, 48000.0};
+
+    bool threw = false;
+    try {
+        BiquadNode node({linearPot("a"), linearPot("b")}, table); // 2 params, 1 axis
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    TS_CHECK(threw);
+}
+
 TS_TEST(biquad_channel_state_is_independent) {
-    const float axis[1] = {0.0f};
-    const BiquadSection sections[1] = {{0.5f, 0.0f, 0.0f, -0.5f, 0.0f}};
-    BiquadCoeffTable table{axis, sections, 1, 48000.0};
+    static const float axis0[1] = {0.0f};
+    static const float* axes[1] = {axis0};
+    static const int dims[1] = {1};
+    static const BiquadSection sections[1] = {{0.5f, 0.0f, 0.0f, -0.5f, 0.0f}};
+    BiquadCoeffTable table{axes, dims, 1, sections, 48000.0};
 
     BiquadNode node(linearPot("drive"), table);
     node.prepare(ProcessSpec{48000.0, 8, 2});

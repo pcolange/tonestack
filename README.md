@@ -14,10 +14,12 @@ Tube Screamer plugin; that pedal becomes the first analytic module here.
 
 ## Status
 
-Phase 1 in progress. The engine core, nodes (`GainNode`, `BiquadNode`), a dev harness, and a
-headless test suite build and run; the `circuitc` compiler discretizes the Tube Screamer
-filters into coefficient tables that the engine consumes through a generated header. Not yet
-usable as a plugin.
+Phase 1 well advanced. The engine core, nodes (`GainNode`, `BiquadNode`, `IirNode`,
+`WaveshaperNode`, `OversampledNode`), a dev harness, and a headless test suite build and
+run. The `circuitc` compiler discretizes two circuits — the Tube Screamer's filters and the
+Dallas Rangemaster (including a multi-axis guitar-source model: volume, cable, pickup) —
+into coefficient grids the engine consumes through generated headers, and the composite
+`RangemasterModule` runs end to end in the harness. Not yet usable as a plugin.
 
 ## Architecture
 
