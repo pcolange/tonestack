@@ -35,62 +35,100 @@ inline constexpr float kHalfbandB[25] = {
     0.0f,
 };
 
-// One 2x resampling direction with per-channel FIR history. Upsampling applies a gain of 2
-// to compensate zero-stuffing; downsampling evaluates the convolution at even indices so a
-// matched up/down pair contributes an integer overall delay.
+// One 2x resampling direction exploiting the halfband structure: every tap at the center's
+// parity is zero except the ~0.5 center itself, so each output costs one dense-phase dot
+// product plus a single center term instead of the full convolution. Per-channel history is
+// a double-written ring (each sample stored at w and w+len), giving O(1) push and a
+// contiguous newest-first window for the dot product. Upsampling applies a gain of 2 to
+// compensate zero-stuffing; downsampling evaluates at even indices so a matched up/down
+// pair contributes an integer overall delay.
 class Halfband2x {
 public:
-    Halfband2x(const float* taps, int numTaps) : taps_(taps), numTaps_(numTaps) {}
+    Halfband2x(const float* taps, int numTaps) : numTaps_(numTaps) {
+        const int center = (numTaps - 1) / 2;
+        denseParity_ = (center & 1) ^ 1;
+        centerIdx_ = center >> 1;
+        centerTap_ = taps[center];
+        for (int k = denseParity_; k < numTaps; k += 2)
+            dense_.push_back(taps[k]);
+        for (int k = 1 - denseParity_; k < numTaps; k += 2)
+            if (k != center && taps[k] != 0.0f)
+                throw std::invalid_argument("Halfband2x: taps are not halfband");
+        histLen_ = std::max(static_cast<int>(dense_.size()), centerIdx_ + 1);
+    }
 
     void prepare(int channels) {
-        hist_.assign(static_cast<size_t>(channels) * static_cast<size_t>(numTaps_), 0.0f);
+        hist_.assign(static_cast<size_t>(channels) * 2u * static_cast<size_t>(2 * histLen_),
+                     0.0f);
+        idx_.assign(static_cast<size_t>(channels) * 2u, 0);
     }
-    void reset() noexcept { std::fill(hist_.begin(), hist_.end(), 0.0f); }
+    void reset() noexcept {
+        std::fill(hist_.begin(), hist_.end(), 0.0f);
+        std::fill(idx_.begin(), idx_.end(), 0);
+    }
 
     int delaySamples() const noexcept { return (numTaps_ - 1) / 2; } // at the high rate
 
     // n low-rate frames in -> 2n high-rate frames out.
     void upsample(int ch, const float* in, float* out, int n) noexcept {
-        float* h = channelHist(ch);
+        float* buf = plane(ch, 0);
+        int& w = idx_[static_cast<size_t>(ch) * 2];
+        const float* dp = dense_.data();
+        const int denseLen = static_cast<int>(dense_.size());
         for (int i = 0; i < n; ++i) {
-            push(h, in[i]);
-            // y[2i+p] = 2 * sum_m taps[2m+p] * x[i-m]
-            float even = 0.0f, odd = 0.0f;
-            for (int m = 0; 2 * m < numTaps_; ++m)
-                even += taps_[2 * m] * h[m];
-            for (int m = 0; 2 * m + 1 < numTaps_; ++m)
-                odd += taps_[2 * m + 1] * h[m];
-            out[2 * i] = 2.0f * even;
-            out[2 * i + 1] = 2.0f * odd;
+            push(buf, w, in[i]);
+            const float* h = buf + w; // h[m] = x[i-m]
+            float acc = 0.0f;         // y[2i+p] = 2 * sum_m taps[2m+p] * x[i-m]
+            for (int m = 0; m < denseLen; ++m)
+                acc += dp[m] * h[m];
+            out[2 * i + denseParity_] = 2.0f * acc;
+            out[2 * i + (1 - denseParity_)] = 2.0f * centerTap_ * h[centerIdx_];
         }
     }
 
     // 2n high-rate frames in -> n low-rate frames out.
     void downsample(int ch, const float* in, float* out, int n) noexcept {
-        float* h = channelHist(ch);
+        float* bufE = plane(ch, 0);
+        float* bufO = plane(ch, 1);
+        int& wE = idx_[static_cast<size_t>(ch) * 2];
+        int& wO = idx_[static_cast<size_t>(ch) * 2 + 1];
+        const float* dp = dense_.data();
+        const int denseLen = static_cast<int>(dense_.size());
         for (int i = 0; i < n; ++i) {
-            push(h, in[2 * i]);
-            float acc = 0.0f;
-            for (int k = 0; k < numTaps_; ++k)
-                acc += taps_[k] * h[k];
+            push(bufE, wE, in[2 * i]);
+            // y[i] = sum_k taps[k] * u[2i-k]: even k reads the even-sample history
+            // (hE[0] = u[2i]), odd k the odd one (hO[0] = u[2i-1]).
+            const float* hE = bufE + wE;
+            const float* hO = bufO + wO;
+            const float* hd = denseParity_ == 0 ? hE : hO;
+            const float* hc = denseParity_ == 0 ? hO : hE;
+            float acc = centerTap_ * hc[centerIdx_];
+            for (int m = 0; m < denseLen; ++m)
+                acc += dp[m] * hd[m];
             out[i] = acc;
-            push(h, in[2 * i + 1]);
+            push(bufO, wO, in[2 * i + 1]);
         }
     }
 
 private:
-    float* channelHist(int ch) noexcept {
-        return hist_.data() + static_cast<size_t>(ch) * static_cast<size_t>(numTaps_);
+    float* plane(int ch, int phase) noexcept {
+        return hist_.data() + (static_cast<size_t>(ch) * 2u + static_cast<size_t>(phase)) *
+                                  static_cast<size_t>(2 * histLen_);
     }
-    void push(float* h, float v) noexcept {
-        for (int k = numTaps_ - 1; k > 0; --k)
-            h[k] = h[k - 1];
-        h[0] = v;
+    void push(float* buf, int& w, float v) noexcept {
+        w = w == 0 ? histLen_ - 1 : w - 1;
+        buf[w] = v;
+        buf[w + histLen_] = v;
     }
 
-    const float* taps_;
     int numTaps_;
-    std::vector<float> hist_; // [channels][numTaps], hist[0] = newest
+    int denseParity_ = 0; // parity of the nonzero (non-center) taps
+    int centerIdx_ = 0;   // center tap's index within its phase
+    float centerTap_ = 0.0f;
+    std::vector<float> dense_; // taps at denseParity_, in order
+    int histLen_ = 0;
+    std::vector<float> hist_; // [channels][2 phases][2*histLen_], double-written ring
+    std::vector<int>   idx_;  // [channels][2 phases] write positions
 };
 
 } // namespace detail

@@ -85,37 +85,20 @@ private:
     void interpolate(float* out) const noexcept {
         TS_RT_ASSERT(table_.coeffs != nullptr && table_.axes != nullptr &&
                      table_.dims != nullptr && table_.numAxes >= 1);
-        const int n = table_.numAxes;
         const int width = 2 * table_.order + 1;
-
-        int   i0[kMaxTableAxes];
-        float t[kMaxTableAxes];
-        int   stride[kMaxTableAxes];
-        for (int k = 0; k < n; ++k)
-            detail::bracketAxis(table_.axes[k], table_.dims[k], params_.byIndex(k).value(),
-                                i0[k], t[k]);
-        stride[n - 1] = 1;
-        for (int k = n - 2; k >= 0; --k)
-            stride[k] = stride[k + 1] * table_.dims[k + 1];
+        float values[kMaxTableAxes];
+        for (int k = 0; k < table_.numAxes; ++k)
+            values[k] = params_.byIndex(k).value();
+        detail::GridCorners gc;
+        detail::gatherCorners(table_.axes, table_.dims, table_.numAxes, values, gc);
 
         for (int w = 0; w < width; ++w)
             out[w] = 0.0f;
-        const int corners = 1 << n;
-        for (int c = 0; c < corners; ++c) {
-            float weight = 1.0f;
-            int idx = 0;
-            for (int k = 0; k < n; ++k) {
-                const int bit = (c >> k) & 1;
-                weight *= bit != 0 ? t[k] : 1.0f - t[k];
-                const int gi = std::min(i0[k] + bit, table_.dims[k] - 1);
-                idx += stride[k] * gi;
-            }
-            if (weight == 0.0f)
-                continue;
-            const float* row =
-                table_.coeffs + static_cast<size_t>(idx) * static_cast<size_t>(width);
+        for (int c = 0; c < gc.count; ++c) {
+            const float* row = table_.coeffs +
+                               static_cast<size_t>(gc.index[c]) * static_cast<size_t>(width);
             for (int w = 0; w < width; ++w)
-                out[w] += weight * row[w];
+                out[w] += gc.weight[c] * row[w];
         }
     }
 

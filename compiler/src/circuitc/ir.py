@@ -21,6 +21,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # Semver. The C++ loader rejects a major-version mismatch.
 IR_VERSION = "0.3.0"
 
+# Mirrors the engine's kMaxTableAxes (nodes/BiquadCoeffs.h): more axes would emit a header
+# the table-driven nodes reject at construction, so the contract rejects it here.
+MAX_TABLE_AXES = 4
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -82,8 +86,8 @@ class BiquadParamTable(_Strict):
 
     @model_validator(mode="after")
     def _check_shapes(self) -> BiquadParamTable:
-        if len(self.params) < 1:
-            raise ValueError(f"{self.id}: at least one parameter axis required")
+        if not 1 <= len(self.params) <= MAX_TABLE_AXES:
+            raise ValueError(f"{self.id}: axis count must be in [1, {MAX_TABLE_AXES}]")
         if len(self.axes) != len(self.params):
             raise ValueError(
                 f"{self.id}: {len(self.axes)} axes for {len(self.params)} params"
@@ -147,8 +151,8 @@ class IirParamTable(_Strict):
     def _check_shapes(self) -> IirParamTable:
         if not 1 <= self.order <= 8:
             raise ValueError(f"{self.id}: order must be in [1, 8]")
-        if len(self.params) < 1:
-            raise ValueError(f"{self.id}: at least one parameter axis required")
+        if not 1 <= len(self.params) <= MAX_TABLE_AXES:
+            raise ValueError(f"{self.id}: axis count must be in [1, {MAX_TABLE_AXES}]")
         if len(self.axes) != len(self.params):
             raise ValueError(f"{self.id}: {len(self.axes)} axes for {len(self.params)} params")
         n = 1

@@ -67,6 +67,20 @@ def test_two_axis_grid_shape_is_validated() -> None:
         )
 
 
+def test_axis_count_capped_at_engine_limit() -> None:
+    # 5 axes would emit a header the engine's kMaxTableAxes == 4 nodes reject at runtime.
+    section = BiquadSection(b0=1.0, b1=0.0, b2=0.0, a1=0.0, a2=0.0)
+    params = [ParamSpec(id=f"p{k}", min=0.0, max=1.0) for k in range(5)]
+    axes = [[0.0]] * 5
+    with pytest.raises(ValidationError):
+        BiquadParamTable(
+            id="bad",
+            params=params,
+            axes=axes,
+            rates=[BiquadRateTable(sample_rate=48000.0, sections=[section])],
+        )
+
+
 def test_extra_fields_forbidden() -> None:
     with pytest.raises(ValidationError):
         ParamSpec.model_validate({"id": "p", "min": 0.0, "max": 1.0, "bogus": 1})

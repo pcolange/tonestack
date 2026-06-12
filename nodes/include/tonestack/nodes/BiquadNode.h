@@ -86,37 +86,20 @@ public:
     ParameterSet& parameters() noexcept override { return params_; }
 
 private:
-    // Multilinear interpolation of the section at the bound parameters' current values:
-    // gather the 2^N bracketing grid corners (row-major, last axis fastest).
+    // Multilinear interpolation of the section at the bound parameters' current values.
     void interpolate(BiquadSection& out) const noexcept {
         TS_RT_ASSERT(table_.sections != nullptr && table_.axes != nullptr &&
                      table_.dims != nullptr && table_.numAxes >= 1);
-        const int n = table_.numAxes;
-
-        int   i0[kMaxTableAxes];
-        float t[kMaxTableAxes];
-        int   stride[kMaxTableAxes];
-        for (int k = 0; k < n; ++k)
-            detail::bracketAxis(table_.axes[k], table_.dims[k], params_.byIndex(k).value(),
-                                i0[k], t[k]);
-        stride[n - 1] = 1;
-        for (int k = n - 2; k >= 0; --k)
-            stride[k] = stride[k + 1] * table_.dims[k + 1];
+        float values[kMaxTableAxes];
+        for (int k = 0; k < table_.numAxes; ++k)
+            values[k] = params_.byIndex(k).value();
+        detail::GridCorners gc;
+        detail::gatherCorners(table_.axes, table_.dims, table_.numAxes, values, gc);
 
         float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
-        const int corners = 1 << n;
-        for (int c = 0; c < corners; ++c) {
-            float w = 1.0f;
-            int idx = 0;
-            for (int k = 0; k < n; ++k) {
-                const int bit = (c >> k) & 1;
-                w *= bit != 0 ? t[k] : 1.0f - t[k];
-                const int gi = std::min(i0[k] + bit, table_.dims[k] - 1);
-                idx += stride[k] * gi;
-            }
-            if (w == 0.0f)
-                continue;
-            const BiquadSection& s = table_.sections[idx];
+        for (int c = 0; c < gc.count; ++c) {
+            const float w = gc.weight[c];
+            const BiquadSection& s = table_.sections[gc.index[c]];
             b0 += w * s.b0;
             b1 += w * s.b1;
             b2 += w * s.b2;
