@@ -10,17 +10,28 @@ from __future__ import annotations
 
 import math
 
-from .discretize import drive_section, tone_section
+from .bias import solve_bias
+from .discretize import (
+    RM_INPUT_ORDER,
+    drive_section,
+    rangemaster_input_iir,
+    rangemaster_output_section,
+    tone_section,
+)
 from .ir import (
     BiquadParamTable,
     BiquadRateTable,
+    BjtWaveshaper,
     CircuitIR,
+    IirParamTable,
+    IirRateTable,
     Oversample,
     ParamSpec,
     Skew,
+    Stage,
     Waveshaper,
 )
-from .netlist import TS9
+from .netlist import TS9, GuitarSource, RangemasterCircuit
 
 # Base sample rates the engine ships tables for.
 DEFAULT_RATES: tuple[float, ...] = (44100.0, 48000.0, 88200.0, 96000.0)
@@ -90,7 +101,7 @@ def build_drive_table(
         )
         for base in rates
     ]
-    return BiquadParamTable(id="drive", param=spec, param_axis=axis, rates=rate_tables)
+    return BiquadParamTable(id="drive", params=[spec], axes=[axis], rates=rate_tables)
 
 
 def build_tone_table(ts: TS9, rates: tuple[float, ...], rows: int) -> BiquadParamTable:
@@ -103,7 +114,7 @@ def build_tone_table(ts: TS9, rates: tuple[float, ...], rows: int) -> BiquadPara
         )
         for base in rates
     ]
-    return BiquadParamTable(id="tone", param=spec, param_axis=axis, rates=rate_tables)
+    return BiquadParamTable(id="tone", params=[spec], axes=[axis], rates=rate_tables)
 
 
 def build_waveshaper(ts: TS9) -> Waveshaper:
@@ -136,3 +147,140 @@ def build_ts9(
             tone,
         ],
     )
+
+
+# --- Rangemaster ---------------------------------------------------------------------------
+
+RM_VOLUME_ROWS = 25
+RM_CABLE_ROWS = 5
+RM_PICKUP_ROWS = 5
+RM_BOOST_ROWS = 25
+
+
+def _cosine_axis(rows: int) -> list[float]:
+    """Proportion-domain rows clustered toward both ends (cosine spacing). Knob axes that
+    feed an audio-taper law swing hardest near the extremes — the Rangemaster's response
+    moves ~20 dB across the last few percent of guitar-volume rotation — so end clustering
+    buys accuracy where uniform spacing wastes rows mid-axis."""
+    return [0.5 * (1.0 - math.cos(math.pi * i / (rows - 1))) for i in range(rows)]
+
+
+def rm_volume_param() -> ParamSpec:
+    # Axis is the knob *proportion*; the A-taper is folded into the discretizer
+    # (discretize.a_taper) so the engine interpolates uniformly spaced rows.
+    return ParamSpec(
+        id="volume",
+        min=0.0,
+        max=1.0,
+        skew=Skew.linear,
+        skew_midpoint=0.5,
+        default_proportion=1.0,
+    )
+
+
+def rm_cable_param(source: GuitarSource) -> ParamSpec:
+    return ParamSpec(
+        id="cable",
+        min=source.cable_min,
+        max=source.cable_max,
+        skew=Skew.linear,
+        skew_midpoint=0.5 * (source.cable_min + source.cable_max),
+        default_proportion=0.33,
+    )
+
+
+def rm_pickup_param() -> ParamSpec:
+    # Morph: 0 = bright single-coil rig, 1 = dark humbucker rig (see GuitarSource).
+    return ParamSpec(
+        id="pickup",
+        min=0.0,
+        max=1.0,
+        skew=Skew.linear,
+        skew_midpoint=0.5,
+        default_proportion=0.0,
+    )
+
+
+def rm_boost_param() -> ParamSpec:
+    # 10KA boost pot; axis is the knob proportion, A-taper folded into the discretizer.
+    return ParamSpec(
+        id="boost",
+        min=0.0,
+        max=1.0,
+        skew=Skew.linear,
+        skew_midpoint=0.5,
+        default_proportion=1.0,
+    )
+
+
+def build_rangemaster_input_table(
+    c: RangemasterCircuit, rates: tuple[float, ...]
+) -> IirParamTable:
+    """One 4th-order direct-form grid over axes [volume, cable, pickup]."""
+    op = solve_bias(c)
+    params = [rm_volume_param(), rm_cable_param(c.source), rm_pickup_param()]
+    axes = [
+        _cosine_axis(RM_VOLUME_ROWS),
+        _axis(params[1], RM_CABLE_ROWS),
+        _axis(params[2], RM_PICKUP_ROWS),
+    ]
+    per_rate: dict[float, list[list[float]]] = {fs: [] for fs in rates}
+    for volume in axes[0]:
+        for cable in axes[1]:
+            for pickup in axes[2]:
+                for fs in rates:
+                    per_rate[fs].append(
+                        rangemaster_input_iir(c, op, volume, cable, pickup, fs)
+                    )
+    return IirParamTable(
+        id="input",
+        order=RM_INPUT_ORDER,
+        params=params,
+        axes=axes,
+        rates=[IirRateTable(sample_rate=fs, rows=per_rate[fs]) for fs in rates],
+    )
+
+
+def build_rangemaster_output_table(
+    c: RangemasterCircuit, rates: tuple[float, ...]
+) -> BiquadParamTable:
+    spec = rm_boost_param()
+    axis = _cosine_axis(RM_BOOST_ROWS)
+    return BiquadParamTable(
+        id="output",
+        params=[spec],
+        axes=[axis],
+        rates=[
+            BiquadRateTable(
+                sample_rate=fs,
+                sections=[rangemaster_output_section(c, b, fs) for b in axis],
+            )
+            for fs in rates
+        ],
+    )
+
+
+def build_rangemaster_stage(c: RangemasterCircuit) -> BjtWaveshaper:
+    op = solve_bias(c)
+    gain = op.ic_exp * c.r_load
+    sat_in = c.transistor.nvt * math.log(1.0 + op.headroom / gain)
+    return BjtWaveshaper(
+        id="stage",
+        thermal_voltage=c.transistor.nvt,
+        gain_volts=gain,
+        headroom=op.headroom,
+        saturation_input=sat_in,
+    )
+
+
+def build_rangemaster(
+    c: RangemasterCircuit | None = None,
+    rates: tuple[float, ...] = DEFAULT_RATES,
+    factor: int = OVERSAMPLE_FACTOR,
+) -> CircuitIR:
+    """The full Rangemaster: source/input grid -> oversampled germanium stage -> boost tap."""
+    c = c or RangemasterCircuit()
+    stages: list[Stage] = [build_rangemaster_input_table(c, rates)]
+    stages.append(Oversample(factor=factor, inner=[build_rangemaster_stage(c)]))
+    stages.append(build_rangemaster_output_table(c, rates))
+    return CircuitIR(name="rangemaster", sample_rates=list(rates), stages=stages)

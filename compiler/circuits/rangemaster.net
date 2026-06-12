@@ -1,0 +1,26 @@
+# Dallas Rangemaster treble booster — netlist source of truth.
+#
+# Traced from the Fuzz Dog Range Master schematic (pedalparts.co.uk, NPN-converted layout of
+# the original) and cross-checked against diy-fever and ElectroSmash notes. The original is
+# PNP germanium (OC44) with a positive-ground -9V supply; values below are the signal-path
+# components, polarity handled as a final inversion. See rangemaster-reference.md for the
+# stage-by-stage ground truth.
+#
+# circuitc/netlist.py (RangemasterCircuit) provides these values to the discretizer. Node 0
+# is ground (the +4.5/-9 rails are AC ground). Pot wipers split as Rpot1/Rpot2.
+#
+# === guitar source model (modeled as table axes; not part of the pedal) ===
+# Pickup EMF -> Rp + Lp (pickup, morph axis single-coil..humbucker) -> guitar volume pot
+# (250k..500k, audio taper, axis) -> cable capacitance to ground (200p..1n, axis) -> jack.
+#
+# === single-stage germanium booster (MODELED) ===
+C1     in     b       4.7n      # input cap; against the low Zin this IS the treble booster
+R1     vcc    b       470k      # base bias divider, top
+R2     b      0       68k       # base bias divider, bottom
+Q1     b      e       c   OC44  # germanium PNP, hFE ~75-100, low leakage selected
+Re     e      0       3.9k
+Ce     e      0       47u       # emitter bypass (shelf corner ~30 Hz)
+RL     vcc    c       10k       # BOOST pot full track = DC collector load (10KA)
+# wiper taps the track at fraction b; C4 couples the tap to the output
+C4     w      out     10n
+Rnext  out    0       1M        # downstream amplifier input (typical)

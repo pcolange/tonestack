@@ -2,30 +2,41 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <stdexcept>
 #include <vector>
 
 #include "tonestack/Node.h"
 #include "tonestack/RtAssert.h"
 #include "tonestack/nodes/BiquadCoeffs.h"
+#include "tonestack/nodes/TableInterp.h"
 
 namespace tonestack::nodes {
 
-// A transposed Direct Form II biquad whose coefficients come from a generated table indexed
-// by one bound parameter (a pot fraction). Each block the parameter is snapshotted and the
-// section is linearly interpolated between the two bracketing table rows; the engine never
-// evaluates a coefficient expression and never allocates after prepare().
+// A transposed Direct Form II biquad whose coefficients come from a generated grid indexed
+// by one bound parameter per table axis. Each block the parameters are snapshotted and the
+// section is multilinearly interpolated between the 2^N bracketing grid corners; the engine
+// never evaluates a coefficient expression and never allocates after prepare().
 //
 // The table is injected as a non-owning view of constexpr data, so this node has no
 // compile-time dependency on the compiler-generated header.
 class BiquadNode : public Node {
 public:
-    // `paramDesc` defines the pot parameter; its physical value() indexes `table.axis`.
-    BiquadNode(const ParameterDesc& paramDesc, const BiquadCoeffTable& table)
+    // One ParameterDesc per table axis, in axis order; each physical value() indexes the
+    // matching `table.axes[k]`.
+    BiquadNode(std::initializer_list<ParameterDesc> paramDescs, const BiquadCoeffTable& table)
         : table_(table) {
-        params_.add(paramDesc);
-        paramIndex_ = params_.indexOf(paramDesc.id);
+        if (table_.numAxes < 1 || table_.numAxes > kMaxTableAxes)
+            throw std::invalid_argument("BiquadNode: table axis count out of range");
+        if (static_cast<int>(paramDescs.size()) != table_.numAxes)
+            throw std::invalid_argument("BiquadNode: one parameter required per table axis");
+        for (const auto& d : paramDescs)
+            params_.add(d);
     }
+
+    // Single-axis convenience.
+    BiquadNode(const ParameterDesc& paramDesc, const BiquadCoeffTable& table)
+        : BiquadNode({paramDesc}, table) {}
 
     NodeInfo info() const noexcept override { return {"biquad"}; }
 
@@ -39,19 +50,19 @@ public:
         params_.prepare(spec.sampleRate);
         z1_.assign(static_cast<size_t>(spec.numChannels), 0.0f);
         z2_.assign(static_cast<size_t>(spec.numChannels), 0.0f);
-        coeffsForValue(currentAxisValue(), current_);
+        interpolate(current_);
     }
 
     void reset() noexcept override {
         params_.reset();
         std::fill(z1_.begin(), z1_.end(), 0.0f);
         std::fill(z2_.begin(), z2_.end(), 0.0f);
-        coeffsForValue(currentAxisValue(), current_);
+        interpolate(current_);
     }
 
     void process(AudioBlock& io) noexcept override {
         params_.snapshotBlock(io.numFrames());
-        coeffsForValue(currentAxisValue(), current_);
+        interpolate(current_);
         const BiquadSection c = current_;
 
         TS_RT_ASSERT(io.numChannels() <= static_cast<int>(z1_.size()));
@@ -75,47 +86,35 @@ public:
     ParameterSet& parameters() noexcept override { return params_; }
 
 private:
-    float currentAxisValue() const noexcept {
-        return params_.byIndex(paramIndex_).value();
-    }
+    // Multilinear interpolation of the section at the bound parameters' current values.
+    void interpolate(BiquadSection& out) const noexcept {
+        TS_RT_ASSERT(table_.sections != nullptr && table_.axes != nullptr &&
+                     table_.dims != nullptr && table_.numAxes >= 1);
+        float values[kMaxTableAxes];
+        for (int k = 0; k < table_.numAxes; ++k)
+            values[k] = params_.byIndex(k).value();
+        detail::GridCorners gc;
+        detail::gatherCorners(table_.axes, table_.dims, table_.numAxes, values, gc);
 
-    // Linear interpolation of the section at axis value `v`, clamped to the table range.
-    void coeffsForValue(float v, BiquadSection& out) const noexcept {
-        TS_RT_ASSERT(table_.rows > 0 && table_.sections != nullptr && table_.axis != nullptr);
-        if (table_.rows <= 1) {
-            out = table_.sections[0];
-            return;
+        float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+        for (int c = 0; c < gc.count; ++c) {
+            const float w = gc.weight[c];
+            const BiquadSection& s = table_.sections[gc.index[c]];
+            b0 += w * s.b0;
+            b1 += w * s.b1;
+            b2 += w * s.b2;
+            a1 += w * s.a1;
+            a2 += w * s.a2;
         }
-        const float* begin = table_.axis;
-        const float* end = table_.axis + table_.rows;
-        // First row with axis > v; the bracketing pair is [hi-1, hi].
-        const float* hi = std::upper_bound(begin, end, v);
-        if (hi == begin) {
-            out = table_.sections[0];
-            return;
-        }
-        if (hi == end) {
-            out = table_.sections[table_.rows - 1];
-            return;
-        }
-        const auto i1 = static_cast<size_t>(hi - begin);
-        const size_t i0 = i1 - 1;
-        const float a0 = table_.axis[i0];
-        const float a1 = table_.axis[i1];
-        const float span = a1 - a0;
-        const float t = span > 0.0f ? (v - a0) / span : 0.0f;
-        const BiquadSection& s0 = table_.sections[i0];
-        const BiquadSection& s1 = table_.sections[i1];
-        out.b0 = s0.b0 + t * (s1.b0 - s0.b0);
-        out.b1 = s0.b1 + t * (s1.b1 - s0.b1);
-        out.b2 = s0.b2 + t * (s1.b2 - s0.b2);
-        out.a1 = s0.a1 + t * (s1.a1 - s0.a1);
-        out.a2 = s0.a2 + t * (s1.a2 - s0.a2);
+        out.b0 = b0;
+        out.b1 = b1;
+        out.b2 = b2;
+        out.a1 = a1;
+        out.a2 = a2;
     }
 
     BiquadCoeffTable table_{};
     ParameterSet params_;
-    int paramIndex_ = -1;
 
     BiquadSection current_{};
     std::vector<float> z1_; // per-channel state, sized in prepare()

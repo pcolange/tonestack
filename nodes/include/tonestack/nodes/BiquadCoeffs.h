@@ -15,17 +15,22 @@ struct BiquadSection {
     float a2 = 0.0f;
 };
 
-// Non-owning view of a coefficient table sampled across a parameter axis (e.g. a pot
-// fraction). `axis` is sorted ascending; row i holds the discretized section at axis[i].
-// The data lives in constexpr arrays in a compiler-generated header (nodes/generated/); the
-// engine never recomputes coefficients, only interpolates between adjacent rows. A table is
-// valid for a single sample rate — the generated header exposes one table per supported rate,
-// and BiquadNode::prepare() rejects a mismatched rate. sampleRate == 0 marks a rate-agnostic
+// Engine-side cap on table dimensionality; sized for fixed audio-thread scratch arrays.
+inline constexpr int kMaxTableAxes = 4;
+
+// Non-owning view of a coefficient grid sampled over one or more parameter axes (pot
+// fractions, source-model controls). `axes[k]` is sorted ascending with `dims[k]` entries;
+// `sections` is the flattened row-major grid (last axis fastest). The data lives in
+// constexpr arrays in a compiler-generated header (nodes/generated/); the engine never
+// recomputes coefficients, only multilinearly interpolates the grid. A table is valid for a
+// single sample rate — the generated header exposes one table per supported rate, and
+// BiquadNode::prepare() rejects a mismatched rate. sampleRate == 0 marks a rate-agnostic
 // table (skips that check; intended for hand-built test tables).
 struct BiquadCoeffTable {
-    const float*         axis = nullptr;     // [rows], ascending parameter values
-    const BiquadSection* sections = nullptr; // [rows]
-    int                  rows = 0;
+    const float* const*  axes = nullptr;     // [numAxes][dims[k]], each ascending
+    const int*           dims = nullptr;     // [numAxes]
+    int                  numAxes = 0;        // 1..kMaxTableAxes
+    const BiquadSection* sections = nullptr; // [prod(dims)], row-major, last axis fastest
     double               sampleRate = 0.0;
 };
 

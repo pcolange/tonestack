@@ -20,21 +20,25 @@ The full design and phased roadmap live in the plan file:
 
 ## Status
 
-**Phase 1 in progress** (both tracks advancing together; the biquad slice is the contract
-meeting point and is complete end-to-end):
+**Phase 1 well advanced** (two circuits compile end-to-end; one is audible):
 
-- **Track (a) — port to nodes.** `BiquadNode` done: transposed Direct Form II, coefficients
-  from an injected `BiquadCoeffTable` (a non-owning view of `constexpr` data) interpolated per
-  block by a bound parameter; no allocation after `prepare()`. `WaveshaperNode` (asinh diode),
-  `OversampledNode`, and the composite `TubeScreamerModule` are next.
-- **Track (b) — `circuitc` compiler.** Skeleton done: pydantic IR (`compiler/src/circuitc/ir.py`,
-  the contract source of truth), a discretizer that bilinear-transforms the TS9 drive/tone
-  filters, pot-sweep sampler, `emit-cpp` codegen, and a CLI.
-  Golden + round-trip + pole-stability tests pass. The symbolic **Lcapy MNA → scipy
-  `bilinear_zpk`** front-end (which must reproduce the same golden) is next.
-- **Meeting point proven.** `circuitc compile` emits `nodes/generated/ts9_tables.h`; the C++
-  `golden_coeffs` test drives `BiquadNode` from that header. CMake codegen is gated on the
-  compiler venv (a C++-only build skips it).
+- **Engine/nodes.** `BiquadNode` (multilinear N-axis grid interpolation), `IirNode`
+  (direct-form low-order grids for networks whose factored form can't be interpolated
+  continuously), `WaveshaperNode<Shape>` (asinh diode, germanium BJT shapes),
+  `OversampledNode` (×4, halfband FIR pairs, exact 29-sample latency), and
+  `RangemasterModule` — the first composite module (constructed per sample rate; the
+  plugin-shell phase adds rate-flexible construction + parameter flattening).
+  `TubeScreamerModule` is next and reuses all of the above.
+- **`circuitc` compiler.** TS9 (closed-form discretizer) and Rangemaster (numeric
+  polynomial-MNA, DC bias solver in `bias.py`) compile to headers + committed goldens.
+  IR 0.3.0: multi-axis `BiquadParamTable`, `IirParamTable`, two waveshaper stages,
+  `Oversample`. The symbolic **Lcapy MNA front-end** (must reproduce the same goldens) is
+  next. Ground truth per circuit lives in `compiler/circuits/*-reference.md` /
+  `REFERENCE.md` — fidelity to the factory schematics is the goal.
+- **Meeting point proven both ways.** `circuitc compile` emits `ts9_tables.h` +
+  `rangemaster_tables.h`; C++ golden tests drive `BiquadNode`/`IirNode`/the module from
+  them, and the harness demos the Rangemaster's treble boost + guitar-volume cleanup.
+  CMake codegen is gated on the compiler venv (a C++-only build skips it).
 
 **Phase 0 complete.** Engine core, `GainNode`, dev harness, headless tests, and CI build/pass.
 Not yet a plugin.
@@ -58,18 +62,23 @@ vendored DSP (RTNeural, chowdsp_* — added in later phases)
   `ParameterSet` (log-skew + per-block smoothing), a linear `Chain` (itself a `Node`, so
   composite modules nest), and a non-owning
   `AudioBlock`. **All allocation in `prepare()`; `process()`/`reset()` are real-time safe.**
-- **`nodes/`** — processing blocks (header-only INTERFACE lib): `GainNode`, `BiquadNode`, and
-  the POD contract types in `BiquadCoeffs.h`. `nodes/generated/` holds codegen output from
-  `circuitc` (gitignored build artifact).
+- **`nodes/`** — processing blocks (header-only INTERFACE lib): `GainNode`, `BiquadNode`,
+  `IirNode`, `WaveshaperNode`, `OversampledNode`, `RangemasterModule`, and the POD contract
+  types (`BiquadCoeffs.h`, `IirCoeffs.h`, `WaveshaperShapes.h`). `nodes/generated/` holds
+  codegen output from `circuitc` (gitignored build artifact); only codegen-gated targets
+  may include it.
 - **`harness/`** — standalone dev runner (synthetic signal now; WAV + live audio later).
 - **`compiler/`** — the offline Python circuit compiler `circuitc` (`src/circuitc/`):
-  `ir.py` (pydantic IR, contract source of truth), `netlist.py` (TS9 component values),
-  `discretize.py` (bilinear discretization of the TS9 filters), `sample.py` (pot sweep → IR), `emit_cpp.py`
-  (IR → `constexpr` header), `cli.py`. Tests + tooling run in `compiler/.venv` (ruff, pyright
-  strict, pytest). `circuits/ts9.net` is the netlist source for the future Lcapy front-end;
-  `circuits/REFERENCE.md` is the schematic-traced ground truth (component values, pot tapers,
-  diode constants, modeled-vs-omitted stages) — fidelity to the factory TS9 is the goal, and
-  changes to circuit values must be justified against it.
+  `ir.py` (pydantic IR, contract source of truth), `netlist.py` (component values),
+  `bias.py` (Rangemaster DC operating point), `discretize.py` (TS9 closed forms +
+  Rangemaster polynomial-MNA → bilinear), `sample.py` (axis sweeps → IR), `emit_cpp.py`
+  (IR → `constexpr` headers), `cli.py` (circuit registry). Tests + tooling run in
+  `compiler/.venv` (ruff, pyright strict, pytest). `circuits/*.net` are the netlist sources
+  for the future Lcapy front-end; `circuits/REFERENCE.md` (TS9) and
+  `circuits/rangemaster-reference.md` are the schematic-traced ground truths (component
+  values, pot tapers, transistor/diode constants, modeled-vs-omitted stages) — fidelity to
+  the factory circuits is the goal, and changes to circuit values must be justified against
+  them.
 - **`contract/`** — the IR/data contract shared between compiler and engine (pydantic schema is
   the single source of truth; coefficient **tables** sampled across pot positions, codegen'd to
   a POD C++ header — no JSON or parametric eval in the RT path).
